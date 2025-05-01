@@ -23,7 +23,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, roc_curve, auc, precision_score, recall_score, f1_score
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, roc_curve, auc, precision_score, recall_score, f1_score, roc_auc_score
 import warnings
 from scipy import stats
 import joblib  # Add joblib for model serialization
@@ -893,6 +893,153 @@ for i, bar in enumerate(plt.gca().patches):
 plt.tight_layout()
 plt.savefig('model_comparison.png', dpi=300, bbox_inches='tight')
 plt.show()
+
+# %% [code] - Cell 23.7: Comparative Confusion Matrices and ROC Curves
+# Create a visual comparison of all three models side by side
+
+# 1. Confusion Matrix Comparison
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+titles = ['Logistic Regression', 'Random Forest', 'Gradient Boosting']
+y_preds = [y_pred_lr, y_pred_rf, y_pred_gb]
+
+for i, (title, y_pred) in enumerate(zip(titles, y_preds)):
+    cm = confusion_matrix(y_test, y_pred)
+    cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    
+    sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues', 
+                xticklabels=list(risk_mapping.keys()), 
+                yticklabels=list(risk_mapping.keys()),
+                ax=axes[i])
+    
+    axes[i].set_title(f'Normalized CM - {title}')
+    axes[i].set_xlabel('Predicted')
+    if i == 0:
+        axes[i].set_ylabel('True')
+    else:
+        axes[i].set_ylabel('')
+
+plt.tight_layout()
+plt.savefig('model_comparison_cm.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+# 2. ROC Curve Comparison
+models_list = [log_reg_pipeline, rf_pipeline, gb_pipeline]
+colors = ['blue', 'green', 'red']
+linestyles = ['-', '--', '-.']
+
+plt.figure(figsize=(12, 10))
+
+# For each class (Low, Moderate, High, Very High)
+for class_idx in range(len(risk_mapping)):
+    plt.subplot(2, 2, class_idx + 1)
+    class_name = list(risk_mapping.keys())[class_idx]
+    
+    # For each model
+    for i, (model_name, model) in enumerate(zip(titles, models_list)):
+        # Calculate the prediction probabilities
+        y_prob = model.predict_proba(X_test)
+        
+        # Calculate ROC curve and ROC area
+        fpr, tpr, _ = roc_curve((y_test == class_idx).astype(int), y_prob[:, class_idx])
+        roc_auc = auc(fpr, tpr)
+        
+        # Plot ROC curve
+        plt.plot(fpr, tpr, color=colors[i], linestyle=linestyles[i],
+                 label=f'{model_name} (AUC = {roc_auc:.2f})')
+    
+    plt.plot([0, 1], [0, 1], 'k--')  # Diagonal line
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'ROC Curve - {class_name} Risk')
+    plt.legend(loc="lower right")
+    plt.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('model_comparison_roc.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+# 3. Comprehensive Performance Metrics Table
+print("\nDetailed Performance Comparison:")
+metrics_df = pd.DataFrame({
+    'Metric': ['Accuracy', 'Precision', 'Recall', 'F1 Score', 'AUC (macro avg)'],
+    'Logistic Regression': [
+        f"{accuracy_score(y_test, y_pred_lr):.4f}",
+        f"{precision_score(y_test, y_pred_lr, average='weighted'):.4f}",
+        f"{recall_score(y_test, y_pred_lr, average='weighted'):.4f}",
+        f"{f1_score(y_test, y_pred_lr, average='weighted'):.4f}",
+        f"{roc_auc_score(y_test, log_reg_pipeline.predict_proba(X_test), multi_class='ovr'):.4f}"
+    ],
+    'Random Forest': [
+        f"{accuracy_score(y_test, y_pred_rf):.4f}",
+        f"{precision_score(y_test, y_pred_rf, average='weighted'):.4f}",
+        f"{recall_score(y_test, y_pred_rf, average='weighted'):.4f}",
+        f"{f1_score(y_test, y_pred_rf, average='weighted'):.4f}",
+        f"{roc_auc_score(y_test, rf_pipeline.predict_proba(X_test), multi_class='ovr'):.4f}"
+    ],
+    'Gradient Boosting': [
+        f"{accuracy_score(y_test, y_pred_gb):.4f}",
+        f"{precision_score(y_test, y_pred_gb, average='weighted'):.4f}",
+        f"{recall_score(y_test, y_pred_gb, average='weighted'):.4f}",
+        f"{f1_score(y_test, y_pred_gb, average='weighted'):.4f}",
+        f"{roc_auc_score(y_test, gb_pipeline.predict_proba(X_test), multi_class='ovr'):.4f}"
+    ]
+})
+
+print(metrics_df.to_string(index=False))
+
+# 4. Statistical Significance Testing
+try:
+    # Try to import from statsmodels instead
+    from statsmodels.stats.contingency_tables import mcnemar
+    
+    print("\nStatistical Significance Testing (McNemar's Test):")
+    print("Comparing model predictions for statistical differences")
+    
+    # Create contingency tables for each pair of models
+    lr_vs_rf = confusion_matrix(y_pred_lr == y_test, y_pred_rf == y_test)
+    lr_vs_gb = confusion_matrix(y_pred_lr == y_test, y_pred_gb == y_test)
+    rf_vs_gb = confusion_matrix(y_pred_rf == y_test, y_pred_gb == y_test)
+    
+    # McNemar's test
+    try:
+        # Statsmodels implementation
+        result_lr_rf = mcnemar(lr_vs_rf, exact=True)
+        result_lr_gb = mcnemar(lr_vs_gb, exact=True)
+        result_rf_gb = mcnemar(rf_vs_gb, exact=True)
+        
+        print(f"LogReg vs RF: p-value = {result_lr_rf.pvalue:.4f} {'(significant)' if result_lr_rf.pvalue < 0.05 else '(not significant)'}")
+        print(f"LogReg vs GB: p-value = {result_lr_gb.pvalue:.4f} {'(significant)' if result_lr_gb.pvalue < 0.05 else '(not significant)'}")
+        print(f"RF vs GB: p-value = {result_rf_gb.pvalue:.4f} {'(significant)' if result_rf_gb.pvalue < 0.05 else '(not significant)'}")
+    except Exception as e:
+        print(f"Could not perform McNemar's test: {e}")
+        print("This might be due to insufficient disagreements between models")
+except ImportError:
+    # Alternative comparison if mcnemar is not available
+    print("\nModel Prediction Comparison (Agreement rates):")
+    print(f"LogReg vs RF agreement: {np.mean(y_pred_lr == y_pred_rf):.4f}")
+    print(f"LogReg vs GB agreement: {np.mean(y_pred_lr == y_pred_gb):.4f}")
+    print(f"RF vs GB agreement: {np.mean(y_pred_rf == y_pred_gb):.4f}")
+    
+    # Compare errors
+    print("\nError patterns comparison:")
+    print(f"LogReg errors: {1 - accuracy_score(y_test, y_pred_lr):.4f}")
+    print(f"RF errors: {1 - accuracy_score(y_test, y_pred_rf):.4f}")
+    print(f"GB errors: {1 - accuracy_score(y_test, y_pred_gb):.4f}")
+    
+    # Check for common/different errors
+    lr_errors = y_pred_lr != y_test
+    rf_errors = y_pred_rf != y_test
+    gb_errors = y_pred_gb != y_test
+    
+    print(f"Errors made by all models: {np.mean(lr_errors & rf_errors & gb_errors):.4f}")
+    print(f"Errors unique to LogReg: {np.mean(lr_errors & ~rf_errors & ~gb_errors):.4f}")
+    print(f"Errors unique to RF: {np.mean(~lr_errors & rf_errors & ~gb_errors):.4f}")
+    print(f"Errors unique to GB: {np.mean(~lr_errors & ~rf_errors & gb_errors):.4f}")
+
+# Import for AUC calculation
+from sklearn.metrics import roc_auc_score
 
 # %% [code] - Cell 24: Hyperparameter Tuning
 # Let's perform a simple grid search to optimize our best model
