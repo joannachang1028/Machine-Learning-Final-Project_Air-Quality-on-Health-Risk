@@ -26,7 +26,7 @@ Ensure PostgreSQL 16 is installed and running on your system. You may need to cr
 
 ### 3. Database Configuration
 
-Edit the database connection parameters in `create_database.py` and `app.py`:
+Edit the database connection parameters in `create_database.py` and `UI.py`:
 
 ```python
 DB_NAME = "air_quality_db"
